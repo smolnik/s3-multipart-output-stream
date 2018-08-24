@@ -44,7 +44,7 @@ public final class S3MultipartOutputStream extends OutputStream {
 	 * @param bufferSize
 	 *            the initial size.
 	 * @exception IllegalArgumentException
-	 *                if size is negative.
+	 *                if size is too small.
 	 */
 	public S3MultipartOutputStream(int bufferSize, String bucket, String key, AmazonS3 s3) {
 		if (bufferSize < MIN_BUFFER_SIZE) {
