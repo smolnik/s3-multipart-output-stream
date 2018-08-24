@@ -27,7 +27,7 @@ public final class S3MultipartOutputStream extends OutputStream {
 
 	private final String uploadId;
 
-	private final List<PartETag> partETags;
+	private final List<PartETag> partETags = new ArrayList<>();
 
 	private int count = 0;
 
@@ -58,7 +58,6 @@ public final class S3MultipartOutputStream extends OutputStream {
 		InitiateMultipartUploadResult initResponse = s3
 				.initiateMultipartUpload(new InitiateMultipartUploadRequest(bucket, key));
 		this.uploadId = initResponse.getUploadId();
-		this.partETags = new ArrayList<>();
 	}
 
 	public synchronized void write(int b) {
