@@ -5,6 +5,11 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.AbortMultipartUploadRequest;
@@ -15,26 +20,28 @@ import com.amazonaws.services.s3.model.PartETag;
 import com.amazonaws.services.s3.model.UploadPartRequest;
 import com.amazonaws.services.s3.model.UploadPartResult;
 
-public final class S3MultipartOutputStream extends OutputStream {
+public class S3ParallelMultipartOutputStream extends OutputStream {
 
 	private static final int MIN_BUFFER_SIZE = 5 * 1024 * 1024;
 
-	private final byte buf[];
-
 	private final AmazonS3 s3;
+
+	private final ExecutorService es;
 
 	private final String bucket, key;
 
 	private final String uploadId;
 
-	private final List<PartETag> partETags = new ArrayList<>();
+	private final List<Future<PartETag>> partETagFutures = new ArrayList<>();
 
-	private int count = 0;
+	private AtomicInteger count = new AtomicInteger(0);
 
 	private int partNumber = 1;
 
-	public S3MultipartOutputStream(String bucket, String key, AmazonS3 s3) {
-		this(256 * 1024 * 1024, bucket, key, s3);
+	private byte buf[];
+
+	public S3ParallelMultipartOutputStream(String bucket, String key, AmazonS3 s3) {
+		this(256 * 1024 * 1024, Runtime.getRuntime().availableProcessors(), bucket, key, s3);
 	}
 
 	/**
@@ -46,7 +53,8 @@ public final class S3MultipartOutputStream extends OutputStream {
 	 * @exception IllegalArgumentException
 	 *                if size is too small.
 	 */
-	public S3MultipartOutputStream(int bufferSize, String bucket, String key, AmazonS3 s3) {
+	public S3ParallelMultipartOutputStream(int bufferSize, int numberOfUploaders, String bucket, String key,
+			AmazonS3 s3) {
 		if (bufferSize < MIN_BUFFER_SIZE) {
 			throw new IllegalArgumentException(
 					"Param bufferSize is smaller than the minimum allowed size: " + MIN_BUFFER_SIZE);
@@ -58,6 +66,7 @@ public final class S3MultipartOutputStream extends OutputStream {
 		InitiateMultipartUploadResult initResponse = s3
 				.initiateMultipartUpload(new InitiateMultipartUploadRequest(bucket, key));
 		this.uploadId = initResponse.getUploadId();
+		this.es = Executors.newFixedThreadPool(numberOfUploaders);
 	}
 
 	@Override
@@ -73,16 +82,17 @@ public final class S3MultipartOutputStream extends OutputStream {
 		try {
 			checkBufferCapacityAndUploadOnceFull(b, off, len);
 		} catch (Exception e) {
-			s3.abortMultipartUpload(new AbortMultipartUploadRequest(bucket, key, uploadId));
+			abortUpload();
 			throw new IllegalStateException(e);
 		}
 
-		System.arraycopy(b, off, buf, count, len);
-		count += len;
+		int c = count.get();
+		System.arraycopy(b, off, buf, c, len);
+		count.set(c + len);
 	}
 
-	private void checkBufferCapacityAndUploadOnceFull(byte b[], int off, int len) {
-		if (count + len > buf.length) {
+	private synchronized void checkBufferCapacityAndUploadOnceFull(byte b[], int off, int len) {
+		if (count.get() + len > buf.length) {
 			uploadPart();
 			reset();
 			partNumber++;
@@ -99,23 +109,43 @@ public final class S3MultipartOutputStream extends OutputStream {
 	}
 
 	private void upload(boolean lastPart) {
+		int c = count.get();
 		UploadPartRequest uploadRequest = new UploadPartRequest().withBucketName(bucket).withKey(key)
-				.withUploadId(uploadId).withPartNumber(partNumber)
-				.withInputStream(new ByteArrayInputStream(buf, 0, count)).withPartSize(count).withLastPart(lastPart);
-		UploadPartResult uploadResult = s3.uploadPart(uploadRequest);
-		partETags.add(uploadResult.getPartETag());
+				.withUploadId(uploadId).withPartNumber(partNumber).withInputStream(new ByteArrayInputStream(buf, 0, c))
+				.withPartSize(c).withLastPart(lastPart);
+		partETagFutures.add(es.submit(() -> {
+			try {
+				UploadPartResult uploadResult = s3.uploadPart(uploadRequest);
+				return uploadResult.getPartETag();
+			} catch (Exception e) {
+				abortUpload();
+				throw new IllegalStateException(e);
+			}
+		}));
+	}
+
+	private void abortUpload() {
+		s3.abortMultipartUpload(new AbortMultipartUploadRequest(bucket, key, uploadId));
 	}
 
 	public synchronized void reset() {
-		count = 0;
-	}
-
-	public synchronized int count() {
-		return count;
+		count = new AtomicInteger(0);
+		buf = new byte[buf.length];
 	}
 
 	public void close() throws IOException {
-		uploadLastPart();
-		s3.completeMultipartUpload(new CompleteMultipartUploadRequest(bucket, key, uploadId, partETags));
+		try {
+			uploadLastPart();
+			List<PartETag> partETags = partETagFutures.stream().map(t -> {
+				try {
+					return t.get();
+				} catch (Exception e) {
+					throw new IllegalStateException(e);
+				}
+			}).collect(Collectors.toList());
+			s3.completeMultipartUpload(new CompleteMultipartUploadRequest(bucket, key, uploadId, partETags));
+		} finally {
+			es.shutdown();
+		}
 	}
 }
