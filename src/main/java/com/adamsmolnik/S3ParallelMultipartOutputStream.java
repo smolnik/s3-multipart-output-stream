@@ -145,7 +145,7 @@ public class S3ParallelMultipartOutputStream extends OutputStream {
 			}).collect(Collectors.toList());
 			s3.completeMultipartUpload(new CompleteMultipartUploadRequest(bucket, key, uploadId, partETags));
 		} finally {
-			es.shutdown();
+			es.shutdownNow();
 		}
 	}
 }
