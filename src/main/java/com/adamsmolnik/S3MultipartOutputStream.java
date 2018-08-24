@@ -82,13 +82,21 @@ public final class S3MultipartOutputStream extends OutputStream {
 
 	private void checkBufferCapacityAndUploadOnceFull(byte b[], int off, int len) {
 		if (count + len > buf.length) {
-			upload(false);
+			uploadPart();
 			reset();
 			partNumber++;
 		}
 
 	}
 
+	private void uploadPart() {
+		upload(false);
+	}
+
+	private void uploadLastPart() {
+		upload(true);
+	}
+	
 	private void upload(boolean lastPart) {
 		UploadPartRequest uploadRequest = new UploadPartRequest().withBucketName(bucket).withKey(key)
 				.withUploadId(uploadId).withPartNumber(partNumber)
@@ -106,7 +114,7 @@ public final class S3MultipartOutputStream extends OutputStream {
 	}
 
 	public void close() throws IOException {
-		upload(true);
+		uploadLastPart();
 		s3.completeMultipartUpload(new CompleteMultipartUploadRequest(bucket, key, uploadId, partETags));
 	}
 }
