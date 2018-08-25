@@ -10,7 +10,6 @@ import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.AbortMultipartUploadRequest;
 import com.amazonaws.services.s3.model.CompleteMultipartUploadRequest;
 import com.amazonaws.services.s3.model.InitiateMultipartUploadRequest;
-import com.amazonaws.services.s3.model.InitiateMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
 import com.amazonaws.services.s3.model.UploadPartRequest;
 import com.amazonaws.services.s3.model.UploadPartResult;
@@ -55,9 +54,7 @@ public final class S3MultipartOutputStream extends OutputStream {
 		this.bucket = bucket;
 		this.key = key;
 		this.s3 = s3;
-		InitiateMultipartUploadResult initResponse = s3
-				.initiateMultipartUpload(new InitiateMultipartUploadRequest(bucket, key));
-		this.uploadId = initResponse.getUploadId();
+		this.uploadId = s3.initiateMultipartUpload(new InitiateMultipartUploadRequest(bucket, key)).getUploadId();
 	}
 
 	@Override
