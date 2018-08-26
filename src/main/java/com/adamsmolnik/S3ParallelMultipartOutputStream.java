@@ -1,5 +1,7 @@
 package com.adamsmolnik;
 
+import static java.util.stream.Collectors.toList;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -9,7 +11,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.AbortMultipartUploadRequest;
@@ -139,7 +140,7 @@ public class S3ParallelMultipartOutputStream extends OutputStream {
 				} catch (Exception e) {
 					throw new IllegalStateException(e);
 				}
-			}).collect(Collectors.toList());
+			}).collect(toList());
 			s3.completeMultipartUpload(new CompleteMultipartUploadRequest(bucket, key, uploadId, partETags));
 		} finally {
 			es.shutdownNow();
